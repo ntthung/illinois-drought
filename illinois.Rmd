@@ -1,0 +1,109 @@
+---
+title: "Droughts in Illinois"
+author: "Hung Nguyen"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_highlight: tango
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(ggplot2)
+library(patchwork)
+
+# Drought analysis functions
+source('drought_analysis_functions.R')
+
+# Adding degree labels to axes
+degree_lon <- function(x) {
+  fcase(x < 0, paste0(-x, "\u00b0W"),
+        x > 180, paste0(360 - x, "\u00b0W"),
+        x %in% c(0, 180), paste0(x, '\u00b0'),
+        x > 0 & x < 180, paste0(x, "\u00b0E"))
+}
+
+degree_lat <- function(x) {
+  ifelse(x < 0, paste0(-x, "\u00b0S"), ifelse(x > 0, paste0(x, "\u00b0N"), paste0(x, '\u00b0')))
+}
+
+# Utility function to skip some axis labels to avoid crowding
+skip_label <- function(n) {
+  function(x) {
+    idx <- seq_along(x)
+    x[idx %% n != 1] <- ' '
+    x
+  }
+}
+
+# Absolute range
+abs_range <- function(x) c(-max(abs(x)), max(abs(x)))
+
+# Theme setting
+my_theme <- theme_bw() +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank())
+theme_set(my_theme)
+update_geom_defaults('line', list(linewidth = 0.2))
+```
+
+```{r read-data}
+il <- fread('illinois-drought-atlas.csv')
+```
+
+## Drought history
+
+```{r}
+# Subset for Illinois
+region <- map_data('state', 'Illinois')
+
+# Get the areal annual mean
+ilAam <- il[, .(pdsi = mean(pdsi)), by = year] 
+
+# Smooth with 10-year moving average
+ilAam[, rm10 := frollmean(pdsi, 10, align = 'center')]
+
+# Get drought episodes from the PDSI time series
+ilDroughts <- get_droughts(ilAam$pdsi)
+ilDroughts[, startYear := ilAam$year[start]]
+ilDroughts[, finalYear := ilAam$year[final]]
+```
+
+List all droughts
+
+```{r, rows.print=35}
+ilDroughts
+```
+
+Find the longest drought
+
+```{r}
+ilDroughts[which.max(dur)]
+```
+
+The longest drought is drought #5, duration 9 years, from 1627 to 1635.
+
+```{r}
+ggplot(ilAam) +
+  geom_rect(aes(xmin = startYear, xmax = finalYear,
+                ymin = -Inf, ymax = Inf),
+            ilDroughts[dn == 5],
+            fill = 'yellow') +
+  geom_line(aes(year, pdsi, color = 'Annual')) +
+  geom_line(aes(year, rm10, color = '10-year rolling mean'), na.rm = TRUE) +
+  scale_color_manual(
+    breaks = c('Annual', '10-year rolling mean'),
+    values = c('gray', 'firebrick')) +
+  geom_hline(yintercept = 0) +
+  scale_x_continuous(breaks = seq(1200, 2000, 25), 
+                     labels = skip_label(4), 
+                     expand = c(0, 0)) +
+  labs(x = NULL, y = 'PDSI [-]', color = NULL) +
+  theme(legend.position = 'bottom')
+```
+
+```{r}
+plot_drought_map(il[year %between% c(1627, 1635)])
+```
+
